@@ -1,0 +1,848 @@
+<!DOCTYPE HTML>
+<HTML lang="en">
+	<Head>
+	<Title>Escape the Maze</TITLE>
+		
+		<!-- 
+		GLSL is the language used for shaders (GL Shader Language)
+		
+		Attribute - you specify how to pull the data out of the buffers you supply.
+		Buffers - Data loaded onto the GPU (Normally vertex information)
+		
+		Uniforms - global variables (in GLSL) that you set before you run the shader program
+		
+		Textures - Textures are arrays of data you can randomly acces in your shader program.  
+		
+		Varying - are way for a vertex shader to pass data to the fragmentShader.
+		-->
+		<script id="2dVertexShader" type="notjs">
+		attribute vec4 a_position;	
+		
+		//!!!!!!!!!!!!!!! Texture change !!!!!!!!!!
+		//We no Longer going to read in colors
+		//attribute vec3 vert_color;
+		//However, we want to send the color to
+		//The fragment Shader
+		//varying vec3 fragColor;
+		//WE need to add varying and attributes for the texture vertex.
+		attribute vec2 texcord;
+		varying vec2 v_texcord;		
+		//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!		
+				
+		uniform vec3 transform;
+		uniform vec3 rotation;		
+		
+		uniform vec3 worldLoc;
+		uniform vec3 worldRotation;
+		uniform float n;
+		uniform float f;
+		uniform float r;
+		uniform float t;
+		
+		uniform bool FaceCam;
+		
+		//Lighting
+		varying vec3 fakenormal;
+		varying vec3 v_surfaceToLight1;
+		varying vec3 v_surfaceToLight2;
+		varying vec3 v_surfaceToLight3;
+		varying vec3 v_surfaceToLight4;
+		varying vec3 v_surfaceToLight5;
+		varying vec3 v_surfaceToLight6;
+		varying vec3 v_surfaceToLight7;
+		varying vec3 v_surfaceToLight8;
+		varying vec3 v_surfaceToLight9;
+		varying vec3 v_surfaceToLight10;
+		varying vec3 v_surfaceToView;
+		varying vec3 v_spot_surfaceToLight;
+		
+		//Bad guy spotlight location
+		uniform vec3 BadGuyLoc;
+		
+		vec4 MoveCamera(vec4 pos)
+		{
+			vec3 cw = cos(worldRotation);
+			vec3 sw = sin(worldRotation);
+			mat4 translateView = mat4(1.0,0.0,0.0,0.0,
+									  0.0,1.0,0.0,0.0,
+									  0.0,0.0,1.0,0.0,
+									  -1.0*worldLoc.x,-1.0*worldLoc.y,worldLoc.z,1.0
+									);
+						
+			mat4 rotateView = mat4(cw.y,0.0,-1.0*sw.y,0.0,
+									0.0,1.0,0.0,0.0,
+									sw.y,0.0,cw.y,0.0,
+									0.0,0.0,0.0,1.0);
+			return rotateView*translateView*pos;
+		}
+		
+		vec4 ApplyProjection(vec4 pos)
+		{
+			mat4 SimpleOrtho = mat4  (1,0.0,0.0,0.0,
+							 0.0,1,0.0,0.0, 
+							 0.0,0.0,1,0.0, 
+							 0.0,0.0,0.0,1.0);
+
+			mat4 ComplexPerspective = mat4(
+										n/r, 0.0,0.0,0.0,
+										0.0, n/t,0.0,0.0,
+										0.0,0.0,-1.0*(f+n)/(f-n),-1.0,
+										0.0,0.0,-2.0*f*n/(f-n),0.0
+										);
+			mat4 ComplexOrtho = mat4(	1.0/r,0.0,0.0,0.0,
+										0.0,1.0/t,0.0,0.0,	//If I make the y -1.0/t I will invert the Y-axis.
+										0.0,0.0,1.0,0.0,
+										0.0,0.0,0.0,1.0	//If I make the x and y translate -1, -1 I can put 0,0 in the bottom right.
+									);
+									
+			mat4 SimplePerspective = 	mat4(
+								1.0,0.0,0.0,0.0,
+								0.0,1.0,0.0,0.0,
+								0.0,0.0,-1.0,-1.0,
+								0.0,0.0,-2.0,0.0			
+								);
+			return ComplexPerspective*pos;
+		}
+		
+		vec4 PositionObject(vec4 pos)
+		{
+			mat4 translateM = mat4(1.0,0.0,0.0,0.0,
+						   0.0,1.0,0.0,0.0,
+						   0.0,0.0,1.0,0.0,
+						   transform.x,transform.y,transform.z,1.0);
+			return translateM*pos;	
+		}
+		
+		vec4 LookAt(vec3 F, vec3 U, vec4 pos)
+		{
+			//precision mediump float;
+			vec3 R = cross(F,U);
+			mat4 LookAt = mat4(R.x,R.y,R.z,0.0,
+								U.x,U.y,U.z,0.0,
+								F.x,F.y,F.z,0.0,
+								0.0,0.0,0.0,1.0);
+					
+			return LookAt*pos;	
+		}
+		//Use a function to Rotate the object
+		vec4 RotateObject(vec4 pos)
+		{
+			//This is a nice trick
+			vec3 c = cos(rotation);
+			vec3 s = sin(rotation);
+			
+			//Surprise!  we have to go column firt when we enter the matrix.
+
+			mat4 rotateX = mat4(1.0,0.0,0.0,0.0,
+								0.0,c.x,s.x,0.0,
+								0.0,-1.0*s.x,c.x,0.0,
+								0.0,0.0,0.0,1.0);
+			mat4 rotateY = mat4(c.y,0.0,-1.0*s.y,0.0,
+								0.0,1.0,0.0,0.0,
+								s.y,0.0,c.y,0.0,
+								0.0,0.0,0.0,1.0);
+			mat4 rotateZ = mat4(c.z,s.z,0.0,0.0,
+								-1.0*s.z,c.z,0.0,0.0,
+								0.0,0.0,1.0,0.0,
+								0.0,0.0,0.0,1.0);
+			return rotateX*rotateY*rotateZ*pos;
+		}
+		void main()
+		{
+			if(length(a_position)<5.0)
+			{
+			//fakenormal = vec3(a_position);
+			fakenormal = RotateObject(a_position).xyz;
+			}
+			else
+			{
+			//Handle the plane.
+			fakenormal = vec3(0.0,1.0,0.0);
+			}
+			vec4 worldSpace = vec4(0.0,0.0,0.0,1.0);
+			if(FaceCam)
+			{
+				vec3 F = normalize(vec3(worldLoc.x,worldLoc.y,-1.0*worldLoc.z)- transform);
+				vec3 U = vec3(0.0,1.0,0.0);
+				worldSpace = PositionObject(LookAt(F,U,a_position));
+			}
+			else
+			{
+				worldSpace = PositionObject(RotateObject(a_position));
+			}
+			//Lighting Stuff
+			v_surfaceToLight1 = vec3(4,0,4) - worldSpace.xyz;
+			v_surfaceToLight2 = vec3(4,0,52) - worldSpace.xyz;
+			v_surfaceToLight3 = vec3(54,0,4) - worldSpace.xyz;
+			v_surfaceToLight4 = vec3(54,0,16) - worldSpace.xyz;
+			v_surfaceToLight5 = vec3(30,0,30) - worldSpace.xyz;
+			v_surfaceToLight6 = vec3(28,0,0) - worldSpace.xyz;
+			v_surfaceToLight7 = vec3(30,0,20) - worldSpace.xyz;
+			v_surfaceToLight8 = vec3(30,0,46) - worldSpace.xyz;
+			v_surfaceToLight9 = vec3(54,0,30) - worldSpace.xyz;
+			v_surfaceToLight10 = vec3(54,0,52) - worldSpace.xyz;
+			v_surfaceToView = vec3(worldLoc.x,worldLoc.y,-1.0*worldLoc.z) - worldSpace.xyz;
+
+
+			v_spot_surfaceToLight = vec3(5.0,0.0,-2.0) - worldSpace.xyz;	
+			
+			//!!!!!!!!!!!!!!!!!TEXTURE CHANGE
+			//fragColor = vert_color;
+			v_texcord = texcord;
+			//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+			
+			vec4 cameraSpace = MoveCamera(worldSpace);
+			gl_Position=ApplyProjection(cameraSpace);
+		}		
+		</SCRIPT>
+		<script id="2dFragmentShader" type="notjs">
+		//Fragment shaders do not have precision so we have to set it.
+		precision mediump float;
+		//varying vec3 fragColor;
+		
+		uniform vec3 temp;
+		varying vec3 fakenormal;
+		varying vec3 v_surfaceToLight1;
+		varying vec3 v_surfaceToLight2;
+		varying vec3 v_surfaceToLight3;
+		varying vec3 v_surfaceToLight4;
+		varying vec3 v_surfaceToLight5;
+		varying vec3 v_surfaceToLight6;
+		varying vec3 v_surfaceToLight7;
+		varying vec3 v_surfaceToLight8;
+		varying vec3 v_surfaceToLight9;
+		varying vec3 v_surfaceToLight10;
+		varying vec3 v_surfaceToView; 
+		varying vec3 v_spot_surfaceToLight;
+		
+		//!!!!!!!!!!!!!!!!Texture change !!!!!!!!!!!!!!!
+		varying vec2 v_texcord;
+		uniform sampler2D sampler;
+		//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		
+		void main()
+		{
+			//gl_FragColor = vec4(fragColor,1); //Between 0 and 1.
+			
+			float ambient = .3;	
+			
+			//gl_FragColor=vec4(ambient*fragColor,1);
+			float d_light = dot(normalize(fakenormal),normalize(vec3(30,5,30)))*.3;
+			if (d_light <0.0)
+			{
+				d_light = 0.0;
+			}
+			//gl_FragColor = vec4(fragColor*(ambient+d_light),1);
+			float p_light1 = dot(normalize(fakenormal),normalize(v_surfaceToLight1))*2.0/length(v_surfaceToLight1);
+			float p_light2 = dot(normalize(fakenormal),normalize(v_surfaceToLight2))*2.0/length(v_surfaceToLight2);
+			float p_light3 = dot(normalize(fakenormal),normalize(v_surfaceToLight3))*2.0/length(v_surfaceToLight3);
+			float p_light4 = dot(normalize(fakenormal),normalize(v_surfaceToLight4))*2.0/length(v_surfaceToLight4);
+			float p_light5 = dot(normalize(fakenormal),normalize(v_surfaceToLight5))*2.0/length(v_surfaceToLight5);
+			float p_light6 = dot(normalize(fakenormal),normalize(v_surfaceToLight6))*2.0/length(v_surfaceToLight6);
+			float p_light7 = dot(normalize(fakenormal),normalize(v_surfaceToLight7))*2.0/length(v_surfaceToLight7);
+			float p_light8 = dot(normalize(fakenormal),normalize(v_surfaceToLight8))*2.0/length(v_surfaceToLight8);
+			float p_light9 = dot(normalize(fakenormal),normalize(v_surfaceToLight9))*2.0/length(v_surfaceToLight9);
+			float p_light10 = dot(normalize(fakenormal),normalize(v_surfaceToLight10))*2.0/length(v_surfaceToLight10);
+			if(p_light1 <0.0)
+			{
+				p_light1 = 0.0;
+			}
+			if(p_light2 <0.0)
+			{
+				p_light2 = 0.0;
+			}
+			if(p_light3 <0.0)
+			{
+				p_light3 = 0.0;
+			}
+			if(p_light4 <0.0)
+			{
+				p_light4 = 0.0;
+			}
+			if(p_light5 <0.0)
+			{
+				p_light5 = 0.0;
+			}
+			if(p_light6 <0.0)
+			{
+				p_light6 = 0.0;
+			}
+			if(p_light7 <0.0)
+			{
+				p_light7 = 0.0;
+			}
+			if(p_light8 <0.0)
+			{
+				p_light8 = 0.0;
+			}
+			if(p_light9 <0.0)
+			{
+				p_light9 = 0.0;
+			}
+			if(p_light10 <0.0)
+			{
+				p_light10 = 0.0;
+			}
+			
+			//For specularity
+			//vec3 halfVector = normalize(normalize(v_surfaceToLight)+normalize(v_surfaceToView));
+			//float p_specular = 0.0;
+			//float Shine = 500.0;
+			/*if(p_light >0.1)
+			{
+				p_specular = pow(dot(normalize(fakenormal),halfVector),Shine);///length(v_surfaceToLight);
+				if(p_specular <0.01)
+				{
+				p_specular = 0.0;
+				}
+				if(p_specular >1.0)
+				{
+				p_specular = 0.0;
+				}
+				//p_light += p_specular;
+			}*/
+			
+			//gl_FragColor = vec4( fragColor*(p_light+d_light+ambient),1);
+			//gl_FragColor.rgb += p_specular*vec3(.8,.8,.8);//+_p2_specular+p3_specular...etc.;//*Specularity Color...
+			
+			/*
+			float spot_light_power =0.0;
+			float spot_light = dot(normalize(v_spot_surfaceToLight),vec3(1,0,0));//- light dir;
+			if(spot_light >= .999)
+			{
+			spot_light_power = dot(normalize(fakenormal),normalize(v_spot_surfaceToLight));
+				if(spot_light_power <0.0)
+				{
+					spot_light_power = 0.0;
+				}
+			}
+			gl_FragColor = vec4(fragColor*(spot_light_power+ambient),1);
+			*/
+			vec4 tempColor = texture2D(sampler,v_texcord);
+			if(tempColor.w<1.0)
+			{
+				discard;
+			}
+			gl_FragColor = vec4(tempColor.zyx*(p_light1+p_light2+p_light3+p_light4+p_light5+p_light6+p_light7+p_light8+p_light9+p_light10+d_light+ambient),1);
+		}
+		</script>
+		
+		<script src="webgl_interface.js"></script>		
+		<script src="BasicGameObject.js"></script>
+		<script>
+		class main
+		{	
+			constructor()
+			{
+				this.Enemy = [];
+				this.Solid = [];
+				this.Camera = [];
+				this.Moving = [];
+				this.Ground = [];
+				this.ObjectCounter = 0;			
+
+				this.myWEBGL = new WebGL_Interface();
+				this.myTriangle = [];
+				this.Keys = [];
+				this.currentLevel = 0;
+				this.currentMovementSpeed = 0.25;
+				this.currentRotationSpeed = 0.01;
+				this.currentCharacterProjectile = 1;
+			}
+			
+			UpdateAll()
+			{
+				for(var i in this.Enemy)
+				{
+					this.Enemy[i].Update();
+				}
+				for(var i in this.Solid)
+				{
+					this.Solid[i].Update();
+				}
+				for(var i in this.Camera)
+				{
+					this.Camera[i].Update();
+				}
+				for(var i in this.Moving)
+				{
+					this.Moving[i].Update();
+				}
+			}
+			
+			RenderAll()
+			{
+				gl.clear(gl.COLOR_BUFFER_BIT);
+				for(var i in this.Enemy)
+				{
+					this.Enemy[i].Render(this.myWEBGL.program);
+				}
+				for(var i in this.Solid)
+				{
+					this.Solid[i].Render(this.myWEBGL.program);
+				}
+				for(var i in this.Camera)
+				{
+					this.Camera[i].Render(this.myWEBGL.program);
+				}
+				for(var i in this.Moving)
+				{
+					this.Moving[i].Render(this.myWEBGL.program);
+				}
+				for(var i in this.Ground)
+				{
+					this.Ground[i].Render(this.myWEBGL.program);
+				}
+			
+			}
+			CheckCollision(loc1,rad1,loc2, rad2)
+			{
+				var range = rad1 + rad2;
+				var distance = Math.sqrt(Math.pow(loc1[0]-loc2[0],2) + Math.pow(loc1[1]-loc2[1],2) + Math.pow(loc1[2]+loc2[2],2))
+				 	//console.log("Loc1: " + loc1 + "Loc2: " + loc2);
+				 	//console.log("Distance: " + distance + " range: " + range)
+				if (distance < range)
+					return true;
+				return false;
+			}
+			Level1()
+			{
+				for(var i in this.Camera) 
+				{
+					this.Camera[i].loc = [30,0,-30]; //maze 1
+					this.Camera[i].rot = [0,4.5,0];
+				}
+				this.currentLevel = 1;
+				canvas.style.zIndex = 2;
+				titleMenu.style.zIndex = 1;
+				theme_song.play();
+			}
+			Level2()
+			{
+				for(var i in this.Camera)
+				{
+					this.Camera[i].loc = [30,0,40]; //maze 2
+					this.Camera[i].rot = [0,5,0];
+				}
+				this.currentLevel = 2;
+				canvas.style.zIndex = 2;
+				titleMenu.style.zIndex = 1;
+				theme_song.play();
+			}
+			Level3()
+			{
+				for(var i in this.Camera)
+				{
+					this.Camera[i].loc = [-40,5,-30]; //maze 3
+					this.Camera[i].rot = [0,2,0];
+				}
+				this.currentLevel = 3;
+				canvas.style.zIndex = 2;
+				titleMenu.style.zIndex = 1;
+				theme_song.play();
+			}
+			BackToTitleMenu()
+			{
+				canvas.style.zIndex = 1;
+				titleMenu.style.zIndex = 2;
+				document.getElementById("result").innerHTML = "Good luck this time around, it gets harder and harder";
+				theme_song.stop();
+			}
+			ChangeMovementSpeed()
+			{
+				var movement_speed_radio_group = document.getElementsByName('movement_speed'); 
+				if(movement_speed_radio_group[0].checked)
+					m.currentMovementSpeed = 0.25;
+				else if(movement_speed_radio_group[1].checked)
+					m.currentMovementSpeed = 0.35;
+				else if(movement_speed_radio_group[2].checked)
+					m.currentMovementSpeed = 0.45;
+			}
+			ChangeRotationSpeed()
+			{
+				var rotation_speed_radio_group = document.getElementsByName('rotation_speed'); 
+				if(rotation_speed_radio_group[0].checked)
+					m.currentRotationSpeed = 0.01;
+				else if(rotation_speed_radio_group[1].checked)
+					m.currentRotationSpeed = 0.05;
+				else if(rotation_speed_radio_group[2].checked)
+					m.currentRotationSpeed = 0.10;
+			}
+			ChangeCharacterProjectile()
+			{
+				var character_projectile_radio_group = document.getElementsByName('character_projectile'); 
+				if(character_projectile_radio_group[0].checked)
+					m.currentCharacterProjectile = 1;
+				else if(character_projectile_radio_group[1].checked)
+					m.currentCharacterProjectile = 2;
+				else if(character_projectile_radio_group[2].checked)
+					m.currentCharacterProjectile = 3;
+			}
+			
+			CreateObject(type, prefab, loc, rot, hp)
+			{
+				//type 0 = Enemy
+				//type 1 = solid
+				//type 2 = Camera
+				//type 3 = Moving
+				//type 4 = Ground
+				var temp = new prefab;
+				var id = "ID"+this.ObjectCounter;
+				this.ObjectCounter++;
+				temp.id = id;
+				temp.prefab = prefab;
+				temp.loc = loc;
+				temp.rot = rot;
+				temp.hp = hp;
+					switch(type)
+					{
+						case 0:
+							this.Enemy[id] = temp;
+						break;
+						case 1:
+							this.Solid[id] = temp;
+						break;
+						case 2:
+							this.Camera[id] = temp;
+						break;
+						case 3:
+							this.Moving[id] = temp;
+						break;
+						case 4:
+							this.Ground[id] = temp;
+						break;
+						default:
+						break;
+					}		
+				return temp;
+				}
+			
+			DestroyObject(id)
+			{
+				if(id in this.Enemy)
+				{
+					delete this.Enemy[id];
+				}
+				if(id in this.Solid)
+				{
+					delete this.Solid[id];
+				}
+				if(id in this.Camera)
+				{
+					delete this.Camera[id];
+				}
+				if(id in this.Moving)
+				{
+					delete this.Moving[id];
+				}
+				if(id in this.Ground)
+				{
+					delete this.Ground[id];
+				}
+			}
+			
+			KeyDown(event)
+			{
+				this.Keys[String.fromCharCode(event.keyCode)] = true;
+				//console.log(String.fromCharCode(event.keyCode) +" should be true - "+this.Keys[String.fromCharCode(event.keyCode)]);
+			}
+			
+			KeyUp(event)
+			{
+				this.Keys[String.fromCharCode(event.keyCode)] = false;
+				//console.log(String.fromCharCode(event.keyCode) +" should be false - "+this.Keys[String.fromCharCode(event.keyCode)]);
+			}
+			MouseClick(event)
+			{
+				var rect = canvas.getBoundingClientRect();
+				var realX = event.clientX - rect.left;
+				var realY = event.clientY - rect.top;
+				//console.log(realX+","+realY);
+				var x = -1 + 2*realX/myCanvas.width;
+				var y = -1 + 2*(myCanvas.height - realY)/myCanvas.height;
+				//console.log("The click occurred on "+x+","+y);
+			}
+			
+			//Static call backs
+			static keyD(event)
+			{
+				m.KeyDown(event);
+			}
+			static keyU(event)
+			{
+				m.KeyUp(event);
+			}
+			static mouseH(event)
+			{
+				m.MouseClick(event);
+			}
+			static MainLoop()
+			{
+				m.UpdateAll();
+				m.RenderAll();
+				requestAnimationFrame(main.MainLoop);
+			}
+		}
+		function sound(src)
+		{
+		    this.sound = document.createElement("audio");
+		    this.sound.src = src;
+		    this.sound.setAttribute("preload", "auto");
+		    this.sound.setAttribute("controls", "none");
+		    this.sound.style.display = "none";
+		    document.body.appendChild(this.sound);
+		    this.play = function()
+		    {
+		        this.sound.play();
+		    }
+		    this.stop = function()
+		    {
+		        this.sound.pause();
+		    }    
+		}
+		</script>
+	</Head>
+
+	<BODY style="padding: 15px;">
+		<div id="container" style = "width: 1400px; height: 650px; position: relative;">
+			<CANVAS id="myCanvas" width="1400" height="650" style = "border: 1px solid #000; position: absolute; z-index: 1">
+					Your browser does not support canvas.
+			</CANVAS>
+			<div id="titleMenu" style = "width: 1400px; height: 650px; background-color: white; border: 1px solid #000; position: absolute; z-index: 2">
+				<p>Escape the Maze</p>
+				<p>2D Mario Edition</p>
+				<button id="buttonLevel1" onclick="m.Level1()">Level 1</button>
+				<button id="buttonLevel2" onclick="m.Level2()">Level 2</button>
+				<button id="buttonLevel3" onclick="m.Level3()">Level 3</button>
+				<br>
+				<br>
+		        <legend>Movement Speed</legend>      
+		        <input type="radio" id="movement_1" name="movement_speed" value="1" onchange="m.ChangeMovementSpeed()" checked>
+		        <label for="movement_1">1</label>
+		        <input type="radio" id="movement_2" name="movement_speed" value="2" onchange="m.ChangeMovementSpeed()">
+		        <label for="movement_2">2</label>
+		        <input type="radio" id="movement_3" name="movement_speed" value="3" onchange="m.ChangeMovementSpeed()">
+		        <label for="movement_3">3</label>
+		        <br><br>
+		        <legend>Rotation Speed</legend>      
+		        <input type="radio" id="rotation_1" name="rotation_speed" value="1" onchange="m.ChangeRotationSpeed()" checked>
+		        <label for="rotation_1">1</label>
+		        <input type="radio" id="rotation_2" name="rotation_speed" value="2" onchange="m.ChangeRotationSpeed()">
+		        <label for="rotation_2">2</label>
+		        <input type="radio" id="rotation_3" name="rotation_speed" value="3" onchange="m.ChangeRotationSpeed()">
+		        <label for="rotation_3">3</label>
+		        <br><br>
+		        <legend>Character Projectile</legend>      
+		        <input type="radio" id="Fireball" name="character_projectile" value="Fireball" onchange="m.ChangeCharacterProjectile()" checked>
+		        <label for="Fireball">Fireball</label> 
+		        <input type="radio" id="Splatter" name="character_projectile" value="Splatter" onchange="m.ChangeCharacterProjectile()">
+		        <label for="Splatter">Splatter</label> 
+		        <input type="radio" id="Banana" name="character_projectile" value="Banana" onchange="m.ChangeCharacterProjectile()">
+		        <label for="Banana">Banana</label>
+			</div>
+		</div>
+		<p id="result">Try, if you dare ...</p>
+		<p id="hp">Current Player Health: 5</p>
+		<button id="backToTitleMenu" onclick="m.BackToTitleMenu()">Back to Title Menu</button>
+		
+		<SCRIPT>
+			var canvas = document.getElementById("myCanvas");
+			var gl = canvas.getContext("webgl");
+			var m = new main();
+			window.onkeydown = main.keyD;
+			window.onkeyup = main.keyU;
+			canvas.addEventListener("click",main.mouseH);
+			var titleMenu = document.getElementById("titleMenu");
+			var theme_song = new sound("song.mp3");
+			var fire_crackle = new sound("fire_crackle.mp3");
+			var shell_ricochet = new sound("shell_ricochet.mp3");
+
+			var maze1 = [
+			  [1,2,1,2,1,2,1,2,1,2,1,2,1,0,0,0,1,2,1,2,1,2,1,2,1,2,1,2,1,2],
+			  [2,0,0,0,1,0,0,0,0,0,0,0,0,0,5,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
+			  [1,0,4,0,1,0,0,0,0,0,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,2],
+			  [2,0,0,0,0,0,0,2,1,0,0,0,0,0,1,2,0,0,0,0,0,1,2,0,0,0,0,0,0,1],
+			  [1,0,0,5,0,0,0,2,1,0,0,2,0,0,1,2,0,0,0,0,2,1,2,1,2,1,0,0,0,2],
+			  [2,0,0,0,0,2,1,0,0,0,0,1,0,0,0,2,0,0,0,2,1,0,0,0,2,1,0,0,0,1],
+			  [1,0,0,0,1,2,0,0,0,5,0,2,2,0,0,1,0,5,0,1,2,0,0,0,1,0,0,0,0,2],
+			  [2,0,0,0,1,1,0,0,0,0,0,1,2,0,0,2,0,0,0,2,1,0,0,1,2,0,0,0,0,1],
+			  [1,0,0,0,1,2,0,0,1,0,0,0,2,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,2],
+			  [2,0,0,0,1,2,0,0,1,0,0,0,0,0,0,0,0,0,0,2,1,0,0,0,0,0,0,0,0,1],
+			  [1,0,0,0,0,0,0,0,0,0,6,0,0,0,0,0,0,0,0,2,2,0,0,1,2,0,0,0,0,2],
+			  [2,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,1,1,1,0,0,1,1,0,0,1,2,1],
+			  [2,0,0,0,1,2,1,1,2,0,0,0,2,2,1,2,0,0,1,2,2,0,0,1,2,0,0,2,1,2],
+			  [1,0,0,0,0,0,0,0,1,0,0,2,1,2,1,2,1,2,1,0,0,0,0,1,0,0,0,1,1,1],
+			  [2,0,0,0,0,0,0,0,1,0,0,2,2,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,2],
+			  [1,0,0,0,1,2,0,0,1,0,0,1,0,0,0,0,0,0,2,0,2,0,0,6,0,0,0,4,0,1],
+			  [2,0,0,0,0,2,0,0,0,0,0,1,0,0,0,0,0,0,1,1,2,0,0,0,0,1,0,0,0,2],
+			  [1,0,0,0,0,0,0,0,0,0,0,2,0,0,0,2,1,2,2,0,0,0,0,0,0,2,0,0,0,1],
+			  [2,0,0,0,0,0,0,0,2,1,1,1,0,0,0,2,1,2,0,0,0,0,0,1,1,1,0,0,0,2],
+			  [1,0,0,0,1,0,0,0,1,2,0,0,0,0,0,0,0,0,0,5,0,1,2,1,2,1,0,0,0,1],
+			  [2,0,0,0,2,2,1,2,2,1,0,0,0,0,0,0,0,0,0,0,0,0,2,2,1,2,0,0,0,2],
+			  [1,0,0,0,1,2,1,1,0,0,0,0,2,1,0,0,0,1,2,1,0,0,0,0,2,1,0,0,0,1],
+			  [2,0,0,0,0,0,1,1,0,0,0,0,2,2,0,0,0,1,1,2,0,0,0,0,0,2,0,0,0,2],
+			  [1,0,0,0,0,0,2,1,0,0,1,2,2,0,0,0,0,0,2,1,2,0,0,0,0,1,0,0,0,1],
+			  [2,0,0,0,2,1,1,1,0,0,1,2,0,0,0,0,0,0,2,2,2,1,0,0,0,2,0,0,0,2],
+			  [1,0,0,0,1,2,1,0,0,0,1,2,0,0,1,0,0,0,1,1,2,2,0,0,0,1,0,0,0,1],
+			  [2,0,0,0,1,2,0,0,6,0,0,0,0,0,1,2,0,0,0,1,2,1,0,0,0,0,0,0,0,2],
+			  [2,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,6,0,0,0,0,1],
+			  [1,2,2,0,0,0,0,0,1,1,1,2,2,2,1,2,0,0,0,0,0,0,0,0,0,0,0,2,1,2],
+			  [2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1]
+			];
+
+			var maze2 = [
+			  [1,2,1,2,1,2,1,2,1,2,1,2,1,0,0,0,1,2,1,2,1,2,1,2,1,2,1,2,1,2],
+			  [2,0,0,0,1,0,0,0,0,0,0,0,0,0,5,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
+			  [1,0,4,0,1,0,0,0,0,0,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,2],
+			  [2,0,0,0,0,0,0,2,1,0,0,0,0,0,1,2,0,0,0,0,0,1,2,0,0,0,0,0,0,1],
+			  [1,0,0,5,0,0,0,2,1,0,0,2,0,0,1,2,0,0,0,0,2,1,2,1,2,1,0,0,0,2],
+			  [2,0,0,0,0,2,1,0,0,0,0,1,0,0,0,2,0,0,0,2,1,0,0,0,2,1,0,0,0,1],
+			  [1,0,0,0,1,2,0,0,0,5,0,2,2,0,0,1,0,5,0,1,2,0,0,0,1,0,0,0,0,2],
+			  [2,0,0,0,1,1,0,0,0,0,0,1,2,0,0,2,0,0,0,2,1,0,0,1,2,0,0,0,0,1],
+			  [1,0,0,0,1,2,0,0,1,0,0,0,2,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,2],
+			  [2,0,0,0,1,2,0,0,1,0,0,0,0,0,0,0,0,0,0,2,1,0,0,0,0,0,0,0,0,1],
+			  [1,0,0,0,0,0,0,0,0,0,6,0,0,0,0,0,0,0,0,2,2,0,0,1,2,0,0,0,0,2],
+			  [2,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,1,1,1,0,0,1,1,0,0,1,2,1],
+			  [2,0,0,0,1,2,1,1,2,0,0,0,2,2,1,2,0,0,1,2,2,0,0,1,2,0,0,2,1,2],
+			  [1,0,0,0,0,0,0,0,1,0,0,2,1,2,1,2,1,2,1,0,0,0,0,1,0,0,0,1,1,1],
+			  [2,0,0,0,0,0,0,0,1,0,0,2,2,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,2],
+			  [1,0,0,0,1,2,0,0,1,0,0,1,0,0,0,0,0,0,2,0,2,0,0,6,0,0,0,4,0,1],
+			  [2,0,0,0,0,2,0,0,0,0,0,1,0,0,0,0,0,0,1,1,2,0,0,0,0,1,0,0,0,2],
+			  [1,0,0,0,0,0,0,0,0,0,0,2,0,0,0,2,1,2,2,0,0,0,0,0,0,2,0,0,0,1],
+			  [2,0,0,0,0,0,0,0,2,1,1,1,0,0,0,2,1,2,0,0,0,0,0,1,1,1,0,0,0,2],
+			  [1,0,0,0,1,0,0,0,1,2,0,0,0,0,0,0,0,0,0,5,0,1,2,1,2,1,0,0,0,1],
+			  [2,0,0,0,2,2,1,2,2,1,0,0,0,0,0,0,0,0,0,0,0,0,2,2,1,2,0,0,0,2],
+			  [1,0,0,0,1,2,1,1,0,0,0,0,2,1,0,0,0,1,2,1,0,0,0,0,2,1,0,0,0,1],
+			  [2,0,0,0,0,0,1,1,0,0,0,0,2,2,0,0,0,1,1,2,0,0,0,0,0,2,0,0,0,2],
+			  [1,0,0,0,0,0,2,1,0,0,1,2,2,0,0,0,0,0,2,1,2,0,0,0,0,1,0,0,0,1],
+			  [2,0,0,0,2,1,1,1,0,0,1,2,0,0,0,0,0,0,2,2,2,1,0,0,0,2,0,0,0,2],
+			  [1,0,0,0,1,2,1,0,0,0,1,2,0,0,1,0,0,0,1,1,2,2,0,0,0,1,0,0,0,1],
+			  [2,0,0,0,1,2,0,0,6,0,0,0,0,0,1,2,0,0,0,1,2,1,0,0,0,0,0,0,0,2],
+			  [2,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,6,0,0,0,0,1],
+			  [1,2,2,0,0,0,0,0,1,1,1,2,2,2,1,2,0,0,0,0,0,0,0,0,0,0,0,2,1,2],
+			  [2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1]
+			];
+
+			var maze3 = [
+			  [1,2,1,2,1,2,1,2,1,2,1,2,1,0,0,0,1,2,1,2,1,2,1,2,1,2,1,2,1,2],
+			  [2,0,0,0,1,0,0,0,0,0,0,0,0,0,5,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
+			  [1,0,4,0,1,0,0,0,0,0,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,2],
+			  [2,0,0,0,0,0,0,2,1,0,0,0,0,0,1,2,0,0,0,0,0,1,2,0,0,0,0,0,0,1],
+			  [1,0,0,5,0,0,0,2,1,0,0,2,0,0,1,2,0,0,0,0,2,1,2,1,2,1,0,0,0,2],
+			  [2,0,0,0,0,2,1,0,0,0,0,1,0,0,0,2,0,0,0,2,1,0,0,0,2,1,0,0,0,1],
+			  [1,0,0,0,1,2,0,0,0,5,0,2,2,0,0,1,0,5,0,1,2,0,0,0,1,0,0,0,0,2],
+			  [2,0,0,0,1,1,0,0,0,0,0,1,2,0,0,2,0,0,0,2,1,0,0,1,2,0,0,0,0,1],
+			  [1,0,0,0,1,2,0,0,1,0,0,0,2,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,2],
+			  [2,0,0,0,1,2,0,0,1,0,0,0,0,0,0,0,0,0,0,2,1,0,0,0,0,0,0,0,0,1],
+			  [1,0,0,0,0,0,0,0,0,0,6,0,0,0,0,0,0,0,0,2,2,0,0,1,2,0,0,0,0,2],
+			  [2,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,1,1,1,0,0,1,1,0,0,1,2,1],
+			  [2,0,0,0,1,2,1,1,2,0,0,0,2,2,1,2,0,0,1,2,2,0,0,1,2,0,0,2,1,2],
+			  [1,0,0,0,0,0,0,0,1,0,0,2,1,2,1,2,1,2,1,0,0,0,0,1,0,0,0,1,1,1],
+			  [2,0,0,0,0,0,0,0,1,0,0,2,2,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,2],
+			  [1,0,0,0,1,2,0,0,1,0,0,1,0,0,0,0,0,0,2,0,2,0,0,6,0,0,0,4,0,1],
+			  [2,0,0,0,0,2,0,0,0,0,0,1,0,0,0,0,0,0,1,1,2,0,0,0,0,1,0,0,0,2],
+			  [1,0,0,0,0,0,0,0,0,0,0,2,0,0,0,2,1,2,2,0,0,0,0,0,0,2,0,0,0,1],
+			  [2,0,0,0,0,0,0,0,2,1,1,1,0,0,0,2,1,2,0,0,0,0,0,1,1,1,0,0,0,2],
+			  [1,0,0,0,1,0,0,0,1,2,0,0,0,0,0,0,0,0,0,5,0,1,2,1,2,1,0,0,0,1],
+			  [2,0,0,0,2,2,1,2,2,1,0,0,0,0,0,0,0,0,0,0,0,0,2,2,1,2,0,0,0,2],
+			  [1,0,0,0,1,2,1,1,0,0,0,0,2,1,0,0,0,1,2,1,0,0,0,0,2,1,0,0,0,1],
+			  [2,0,0,0,0,0,1,1,0,0,0,0,2,2,0,0,0,1,1,2,0,0,0,0,0,2,0,0,0,2],
+			  [1,0,0,0,0,0,2,1,0,0,1,2,2,0,0,0,0,0,2,1,2,0,0,0,0,1,0,0,0,1],
+			  [2,0,0,0,2,1,1,1,0,0,1,2,0,0,0,0,0,0,2,2,2,1,0,0,0,2,0,0,0,2],
+			  [1,0,0,0,1,2,1,0,0,0,1,2,0,0,1,0,0,0,1,1,2,2,0,0,0,1,0,0,0,1],
+			  [2,0,0,0,1,2,0,0,6,0,0,0,0,0,1,2,0,0,0,1,2,1,0,0,0,0,0,0,0,2],
+			  [2,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,6,0,0,0,0,1],
+			  [1,2,2,0,0,0,0,0,1,1,1,2,2,2,1,2,0,0,0,0,0,0,0,0,0,0,0,2,1,2],
+			  [2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1]
+			];
+
+			m.CreateObject(4,Ground,[0,-1,0],[0,0,0],0);
+			var camera = m.CreateObject(2,Camera,[30,5,-30],[0,4.5,0],5);
+
+			for(var i=0; i<60; i+=2)
+			{
+				for(var j=0; j<60; j+=2)
+				{
+					if(maze1[i/2][j/2] == 1)
+					{
+						m.CreateObject(1, Block, [j,0,i],[0,0,0],0);
+					}
+					else if (maze1[i/2][j/2] == 2)
+					{
+						m.CreateObject(1, Block, [j,0,i],[0,0,0],0).ChangeToRock();
+					}
+					else if (maze1[i/2][j/2] == 4)
+					{
+						m.CreateObject(0,Quad,[j,0,i],[0,0,0],3).ChangeToGoomba0();
+					}
+					else if (maze1[i/2][j/2] == 5)
+					{
+						m.CreateObject(0,Quad,[j,0,i],[0,0,0],1).ChangeToBombomb0();
+					}
+					else if (maze1[i/2][j/2] == 6)
+					{
+						m.CreateObject(0,Quad,[j,0,i],[0,0,0],2).ChangeToKoopa0();
+					}
+				}
+			}
+
+			for(var i=0; i<60; i+=2)
+			{
+				for(var j=-10; j>-70; j-=2)
+				{
+					if(maze2[i/2][(-j-10)/2] == 1)
+					{
+						m.CreateObject(1, Block, [j,0,i],[0,0,0],0);
+					}
+					else if (maze2[i/2][(-j-10)/2] == 2)
+					{
+						m.CreateObject(1, Block, [j,0,i],[0,0,0],0).ChangeToRock();
+					}
+					else if (maze2[i/2][(-j-10)/2] == 4)
+					{
+						m.CreateObject(0,Quad,[j,0,i],[0,0,0],4).ChangeToGoomba0();
+					}
+					else if (maze2[i/2][(-j-10)/2] == 5)
+					{
+						m.CreateObject(0,Quad,[j,0,i],[0,0,0],2).ChangeToBombomb0();
+					}
+					else if (maze2[i/2][(-j-10)/2] == 6)
+					{
+						m.CreateObject(0,Quad,[j,0,i],[0,0,0],3).ChangeToKoopa0();
+					}
+				}
+			}
+
+			for(var i=-10; i>-70; i-=2)
+			{
+				for(var j=0; j<60; j+=2)
+				{
+					if(maze2[(-i-10)/2][j/2] == 1)
+					{
+						m.CreateObject(1, Block, [j,0,i],[0,0,0],0);
+					}
+					else if (maze2[(-i-10)/2][j/2] == 2)
+					{
+						m.CreateObject(1, Block, [j,0,i],[0,0,0],0).ChangeToRock();
+					}
+					else if (maze2[(-i-10)/2][j/2] == 4)
+					{
+						m.CreateObject(0,Quad,[j,0,i],[0,0,0],5).ChangeToGoomba0();
+					}
+					else if (maze2[(-i-10)/2][j/2] == 5)
+					{
+						m.CreateObject(0,Quad,[j,0,i],[0,0,0],3).ChangeToBombomb0();
+					}
+					else if (maze2[(-i-10)/2][j/2] == 6)
+					{
+						m.CreateObject(0,Quad,[j,0,i],[0,0,0],4).ChangeToKoopa0();
+					}
+				}
+			}
+
+			requestAnimationFrame(main.MainLoop);
+		</SCRIPT>
+	</BODY>
+</HTML>
+		
+		
