@@ -1,0 +1,7 @@
+# Store text files with LF line endings and check them out with LF
+* text=auto eol=lf
+
+*.png binary
+*.mp3 binary
+*.ogg binary
+*.wav binary
