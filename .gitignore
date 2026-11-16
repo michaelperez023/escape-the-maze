@@ -1,0 +1,3 @@
+# Installed by hand to run tests/smoke.mjs
+node_modules/
+.DS_Store

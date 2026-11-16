@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # The runner image includes Google Chrome; puppeteer-core drives it without downloading a browser.
+      - name: Install puppeteer-core
+        run: npm install --no-save --no-package-lock puppeteer-core@25.17.0
+
+      # The runner has no GPU, so Chrome renders WebGL on the CPU (SwiftShader).
+      - name: Load the game in headless Chrome
+        env:
+          SOFTWARE_GL: 1
+        run: node tests/smoke.mjs
