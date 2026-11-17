@@ -142,6 +142,7 @@ class main
 		if(this.state == "loading")
 			return;
 		sounds.Unlock();
+		sounds.PlayMusic();
 		this.ClearShots();
 		this.SpawnEnemies(level);
 		this.currentLevel = level;
@@ -197,6 +198,7 @@ class main
 			return;
 		this.state = "menu";
 		this.currentLevel = 0;
+		sounds.PauseMusic();
 		this.ClearShots();
 		this.ClearKeys();
 		this.player.loc = [30,5,30];
@@ -404,6 +406,8 @@ function Start()
 	window.addEventListener("keydown", main.keyD);
 	window.addEventListener("keyup", main.keyU);
 	window.addEventListener("blur", () => m.ClearKeys());
+	//The music pauses while the tab is hidden.
+	document.addEventListener("visibilitychange", () => sounds.UpdateMusic());
 
 	for(let level = 1; level <= 3; level++)
 		document.getElementById("buttonLevel" + level).addEventListener("click", () => m.StartLevel(level));

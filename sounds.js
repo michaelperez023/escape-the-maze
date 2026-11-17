@@ -1,4 +1,19 @@
-// Sound effects, synthesized with the Web Audio API each time they play. There are no audio files.
+// Sound: the background music, assets/song.mp3, and the sound effects, which are synthesized
+// with the Web Audio API each time they play. The music is downloaded when a level first
+// starts with sound on, so no audio file is loaded before then.
+
+//The music loops without a gap. Chrome's decoder already drops the encoder delay and padding
+//that the file's iTunSMPB tag records (at 44.1 kHz it decodes exactly the 3,612,020 samples the
+//tag gives), but the song itself starts with about 20 ms of silence and ends with more than a
+//second of it, so the loop runs from just before its first note to just after its last note
+//has faded out.
+var MUSIC = {
+	file: "assets/song.mp3",
+	volume: .12,        //the music's typical loudness is then about 7 dB under a sound effect at full volume
+	loopStart: .019,    //seconds
+	loopEnd: 80.755,
+	fade: .015          //time constant of the fade when the music starts or pauses, in seconds
+};
 
 //A short burst of filtered noise.
 function NoiseBurst(context, destination, noise, start, duration, filterType, frequency, peak)
@@ -65,6 +80,13 @@ class SoundEffects
 		this.enabled = true;
 		this.context = null;
 		this.lastPlayed = {};
+		this.musicWanted = false;            //a level is on, so the music should play
+		this.musicRequested = false;         //the song is only requested once, even if loading fails
+		this.musicBuffer = null;             //the decoded song
+		this.musicSource = null;             //the AudioBufferSourceNode playing it, while it plays
+		this.musicGain = null;               //its own gain node, which fades it in and out
+		this.musicOffset = MUSIC.loopStart;  //where in the song it starts or resumes, in seconds
+		this.musicStarted = 0;               //the context time when musicSource started
 	}
 
 	//Browsers only let a page start audio after the player clicks or presses a key, so the
@@ -96,6 +118,90 @@ class SoundEffects
 			return;
 		this.lastPlayed[sound.name] = now;
 		sound(this.context, this.output, this.noise, now, Math.min(volume, 1));
+	}
+
+	//Starting a level calls this; going back to the title menu calls PauseMusic, and the
+	//music resumes from the same place.
+	PlayMusic()
+	{
+		this.musicWanted = true;
+		this.UpdateMusic();
+	}
+	PauseMusic()
+	{
+		this.musicWanted = false;
+		this.UpdateMusic();
+	}
+
+	//Plays the music while a level is on, sound is on and the tab is visible, and pauses it
+	//otherwise. While the song is still loading, only musicWanted changes; it is checked again
+	//once the song has loaded, so there is never more than one copy playing.
+	UpdateMusic()
+	{
+		if (!this.context)
+			return;
+		if (this.musicWanted && this.enabled && !this.musicRequested)
+			this.LoadMusic();
+		const play = this.musicWanted && this.enabled && !document.hidden && this.musicBuffer !== null;
+		const now = this.context.currentTime;
+		if (play && !this.musicSource)
+		{
+			this.musicSource = this.context.createBufferSource();
+			this.musicSource.buffer = this.musicBuffer;
+			this.musicSource.loop = true;
+			this.musicSource.loopStart = MUSIC.loopStart;
+			this.musicSource.loopEnd = MUSIC.loopEnd;
+			this.musicGain = this.context.createGain();
+			this.musicGain.gain.setValueAtTime(0, now);
+			this.musicGain.gain.setTargetAtTime(MUSIC.volume, now, MUSIC.fade);
+			this.musicSource.connect(this.musicGain);
+			this.musicGain.connect(this.output);
+			this.musicSource.start(now, this.musicOffset);
+			this.musicStarted = now;
+		}
+		else if (!play && this.musicSource)
+		{
+			this.musicOffset = this.musicPosition;
+			this.musicGain.gain.setTargetAtTime(0, now, MUSIC.fade);
+			this.musicSource.stop(now + 10 * MUSIC.fade);
+			this.musicSource = null;
+		}
+	}
+
+	//Downloads and decodes the song. If that fails, for example offline, the game goes on
+	//without music.
+	LoadMusic()
+	{
+		this.musicRequested = true;
+		fetch(MUSIC.file)
+			.then(response =>
+			{
+				if (!response.ok)
+					throw new Error("HTTP status " + response.status);
+				return response.arrayBuffer();
+			})
+			.then(data => this.context.decodeAudioData(data))
+			.then(buffer =>
+			{
+				this.musicBuffer = buffer;
+				this.UpdateMusic();
+			})
+			.catch(error => console.warn("The game will play without music: " + MUSIC.file + " could not be loaded (" + error.message + ")."));
+	}
+
+	//Whether the music is playing, and where it is in the song (or where it paused), in
+	//seconds. The smoke test reads these.
+	get musicPlaying()
+	{
+		return this.musicSource !== null;
+	}
+	get musicPosition()
+	{
+		if (!this.musicSource)
+			return this.musicOffset;
+		const position = this.musicOffset + this.context.currentTime - this.musicStarted;
+		return position < MUSIC.loopEnd ? position
+			: MUSIC.loopStart + (position - MUSIC.loopStart) % (MUSIC.loopEnd - MUSIC.loopStart);
 	}
 }
 
